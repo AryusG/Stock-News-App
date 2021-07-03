@@ -1,51 +1,81 @@
 import requests
+import os
 from twilio.rest import Client
 
-tesla_symbol = "TSLA"
-apple_symbol = "AAPL"
-
 alpha_v_url = "https://www.alphavantage.co/query"
-ALPHA_V_KEY = "RXB5X5ZP30LEIHLC"
+ALPHA_V_KEY = os.environ.get("ALPHA_V_KEY")
+print(ALPHA_V_KEY)
 news_api_url = "https://newsapi.org/v2/everything"
-NEWS_API_KEY = "8b8e7106d253444780ad459c18da8e92"
-twilio_sid = "ACb39d08fa73108b010c7170ce6892c653"
-twilio_token = "e931192b3370831e3d06edf4363f6228"
-twilio_phone = "+12514395722"
-test_phone = "+61432111467"
+NEWS_API_KEY = os.environ.get("NEWS_API_KEY")
+twilio_sid = os.environ.get("TWILIO_SID")
+twilio_token = os.environ.get("TWILIO_TOKEN")
+twilio_phone = os.environ.get("TWILIO_PHONE")
+test_phone = os.environ.get("TEST_PHONE")
 
-alpha_parameters = {
-    "function": "TIME_SERIES_DAILY",
-    "symbol": tesla_symbol,
-    "apikey": ALPHA_V_KEY
+stocks_dict = {
+    "Tesla": "TSLA",
+    "Apple": "AAPL",
+    "Disney": "DIS"
 }
 
-news_api_parameters = {
-    "q": "tesla",
-    "apiKey": NEWS_API_KEY
-}
+for (name, symbol) in stocks_dict.items():
+    stock_name = name
+    stock_symbol = symbol
 
-r_alpha_v = requests.get(alpha_v_url, alpha_parameters)
-r_alpha_v.raise_for_status()
-alpha_v_data = r_alpha_v.json()
+    alpha_parameters = {
+        "function": "TIME_SERIES_DAILY",
+        "symbol": stock_symbol,
+        "apikey": ALPHA_V_KEY
+    }
 
-closing_price_list = [float(data['4. close']) for (date, data) in alpha_v_data['Time Series (Daily)'].items()]
-print(closing_price_list[:2])
-percent_diff = (abs(closing_price_list[0] - closing_price_list[1]) / closing_price_list[1]) * 100
-print(f"{percent_diff}% difference")
+    news_api_parameters = {
+        "q": stock_name,
+        "apiKey": NEWS_API_KEY,
+        "sortBY": "popularity"
+    }
 
-# if percent_diff > 5:
-#     print("Print News")
-#
-# else:
-#     print("Not significant")
 
-r_news = requests.get(news_api_url, news_api_parameters)
-r_news.raise_for_status()
-news_data = r_news.json()['articles']
+    # Alpha Vantage API
+    r_alpha_v = requests.get(alpha_v_url, alpha_parameters)
+    r_alpha_v.raise_for_status()
+    alpha_v_data = r_alpha_v.json()
+    print(alpha_v_data)
+    closing_price_list = [float(data['4. close']) for (date, data) in alpha_v_data['Time Series (Daily)'].items()]
+    latest_close_price = closing_price_list[0]
+    previous_close_price = closing_price_list[1]
 
-for n in range(0, 3):
-    title = news_data[n]['title']
-    description = news_data[n]['description']
-    url = news_data[n]['url']
-    print(title, description, url)
+    percent_diff = ((latest_close_price - previous_close_price) / previous_close_price) * 100
 
+    up_down_symbol = "🔺"
+    if percent_diff < 0:
+        up_down_symbol = "🔻"
+    print(f"\n{stock_name}: ${latest_close_price} {up_down_symbol}{abs(percent_diff)}% from ${previous_close_price}"
+          f"\nTOP 3 ARTICLES:")
+
+    # News API + SMS Send
+    r_news = requests.get(news_api_url, news_api_parameters)
+    r_news.raise_for_status()
+    news_data = r_news.json()['articles']
+
+    for n in range(0, 3):
+        title = news_data[n]['title']
+        description = news_data[n]['description']
+        url = news_data[n]['url']
+        print(f"    Title: {title} | Brief: {description}\n | URL: {url}")
+
+        if abs(percent_diff) > 5:
+            client = Client(twilio_sid, twilio_token)
+            message = client.messages \
+                            .create(
+                                 body=f"\n\n{stock_symbol}: ${latest_close_price}"
+                                      f"{up_down_symbol}{round(abs(percent_diff), 1)}%\n\n"
+                                      f"Headline: {title}\n\n"
+                                      f"Brief: {description}\n"
+                                      f"URL: {url}",
+                                 from_=twilio_phone,
+                                 to=test_phone
+                             )
+
+            print(message.status)
+        else:
+            print("No SMS sent - stock movement stable.\n")
